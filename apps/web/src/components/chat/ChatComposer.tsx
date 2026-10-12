@@ -1084,6 +1084,7 @@ import {
   FileIcon,
   BotIcon,
   CircleAlertIcon,
+  Clock3Icon,
   PaperclipIcon,
   PencilRulerIcon,
   PlayIcon,
@@ -1665,6 +1666,7 @@ export interface ChatComposerProps {
   onRemoveEditingQueuedAttachment: (attachmentId: string) => void;
 
   // Callbacks
+  onSchedulePrompt?: (() => void) | undefined;
   onCompactContext: () => void;
   onSend: (
     e?: { preventDefault: () => void },
@@ -7673,6 +7675,43 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         <TooltipPopup>Attach files</TooltipPopup>
                       </Tooltip>
                     </>
+                  ) : null}
+                  {props.onSchedulePrompt ? (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label="Make prompt a recurring task"
+                            disabled={
+                              !canOperateThread ||
+                              isConnecting ||
+                              isSendBusy ||
+                              !prompt.trim() ||
+                              noProviderAvailable ||
+                              projectSelectionRequired ||
+                              environmentUnavailable !== null ||
+                              composerImages.length > 0 ||
+                              composerFiles.length > 0 ||
+                              composerTerminalContexts.length > 0 ||
+                              composerPreviewAnnotations.length > 0 ||
+                              composerReviewComments.length > 0 ||
+                              composerThreadContexts.length > 0 ||
+                              multipleModelSelections !== null
+                            }
+                            onClick={props.onSchedulePrompt}
+                          />
+                        }
+                      >
+                        <Clock3Icon />
+                      </TooltipTrigger>
+                      <TooltipPopup>
+                        Make prompt a recurring task. Uses prompt text and one model; remove
+                        attachments first.
+                      </TooltipPopup>
+                    </Tooltip>
                   ) : null}
                   <ComposerFooterPrimaryActions
                     compact={isComposerResting || isComposerPrimaryActionsCompact}

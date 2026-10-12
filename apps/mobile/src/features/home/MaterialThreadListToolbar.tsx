@@ -1,3 +1,4 @@
+import { useOpenScheduledTasks } from "./useOpenScheduledTasks";
 import { useCallback, useEffect, useRef, useState, type ComponentProps } from "react";
 import { useNavigation, useNavigationState } from "@react-navigation/native";
 import { useWorkspaceTabs } from "../workspace/WorkspaceTabsContext";
@@ -38,6 +39,7 @@ export function MaterialThreadListToolbar(props: {
 }) {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
+  const openScheduledTasks = useOpenScheduledTasks();
   const workspace = useWorkspaceTabs();
   const isTabActive = workspace?.isTabActive;
   const homeFocused = useNavigationState((state) => state.routes[state.index]?.name === "Home");
@@ -129,6 +131,11 @@ export function MaterialThreadListToolbar(props: {
                 accessibilityLabel="Search threads"
                 icon="magnifyingglass"
                 onPress={openSearch}
+              />
+              <AndroidHeaderIconButton
+                accessibilityLabel="Scheduled tasks"
+                icon="clock"
+                onPress={openScheduledTasks}
               />
               <AndroidHeaderIconButton
                 accessibilityLabel="Open settings"

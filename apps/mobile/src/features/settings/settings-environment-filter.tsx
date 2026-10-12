@@ -1,6 +1,6 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { buildProjectGroups } from "@t3tools/client-runtime/state/project-grouping";
-import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useCallback, useMemo, useState, type ReactNode } from "react";
 
 import { useEnvironments, type EnvironmentPresentation } from "../../state/environments";
 import { useProjects } from "../../state/entities";
@@ -26,6 +26,7 @@ const SettingsEnvironmentFilterContext = createContext<{
   readonly selectableProjectGroups: ReturnType<typeof buildProjectGroups>;
   readonly selectedProjectKey: string | null;
   readonly selectProject: (projectKey: string | null) => void;
+  readonly selectEnvironment: (environmentId: EnvironmentId | null) => void;
   readonly selectAll: () => void;
   readonly toggleEnvironment: (environmentId: EnvironmentId) => void;
 } | null>(null);
@@ -62,6 +63,9 @@ export function SettingsEnvironmentFilterProvider(props: { readonly children: Re
       ),
     [projectGroups, selectedTargets],
   );
+  const selectEnvironment = useCallback((environmentId: EnvironmentId | null) => {
+    setSelectedIds(environmentId === null ? null : new Set([environmentId]));
+  }, []);
   const value = useMemo(
     () => ({
       availableTargets,
@@ -71,6 +75,7 @@ export function SettingsEnvironmentFilterProvider(props: { readonly children: Re
       selectableProjectGroups,
       selectedProjectKey,
       selectProject: setSelectedProjectKey,
+      selectEnvironment,
       selectAll: () => setSelectedIds(null),
       toggleEnvironment: (environmentId: EnvironmentId) =>
         setSelectedIds((current) =>
@@ -84,6 +89,7 @@ export function SettingsEnvironmentFilterProvider(props: { readonly children: Re
       projectGroups,
       selectableProjectGroups,
       selectedProjectKey,
+      selectEnvironment,
     ],
   );
   return (

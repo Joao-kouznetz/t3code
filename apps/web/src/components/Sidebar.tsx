@@ -5197,6 +5197,13 @@ export default function Sidebar() {
                   </ComboboxPopup>
                 </Combobox>
               }
+              onOpenScheduledTasks={() => {
+                if (isMobile) setOpenMobile(false);
+                void router.navigate({
+                  to: "/settings/scheduled-tasks",
+                  search: { project: scopedProjectGroup?.projectKey },
+                });
+              }}
               onNewProject={openAddProjectCommandPalette}
               onNewThread={handleNewThreadClick}
               newThreadDisabled={projects.length === 0}

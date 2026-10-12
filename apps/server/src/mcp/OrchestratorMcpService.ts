@@ -224,17 +224,14 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/**
- * Workspace strategy for a scheduled task created/updated over MCP: bound runs
- * post into the existing thread (the strategy is unused, keep root); unbound
- * runs launch a fresh worktree per run.
- */
+/** Fresh runs use the caller's branch when available; folder projects need no Git worktree. */
 function scheduledTaskWorkspaceStrategy(
   boundToThread: boolean,
+  caller: Pick<OrchestrationV2ThreadProjection["thread"], "branch"> | undefined,
 ): ScheduledTask["workspaceStrategy"] {
-  return boundToThread
+  return boundToThread || !caller?.branch
     ? { type: "root" }
-    : { type: "worktree", baseRef: "main", startFromOrigin: true };
+    : { type: "worktree", baseRef: caller.branch, startFromOrigin: false };
 }
 
 /**
@@ -1644,7 +1641,10 @@ const make = Effect.gen(function* () {
           schedule: input.schedule,
           projectId,
           threadId: bindToCurrentThread && parent !== undefined ? parent.thread.id : null,
-          workspaceStrategy: scheduledTaskWorkspaceStrategy(bindToCurrentThread),
+          workspaceStrategy: scheduledTaskWorkspaceStrategy(
+            bindToCurrentThread,
+            parent?.thread.projectId === projectId ? parent.thread : undefined,
+          ),
           modelSelection,
           runtimeMode: limits.runtimeMode,
           interactionMode: limits.interactionMode,
@@ -1711,13 +1711,14 @@ const make = Effect.gen(function* () {
             : input.bindToCurrentThread && parent !== undefined
               ? parent.thread.id
               : null;
-        // Rebinding changes where runs execute, so the workspace strategy must
-        // follow: unbinding a root-strategy task would otherwise run loose
-        // prompts in the shared project checkout.
+        // Existing tasks keep their workspace unless the caller explicitly rebinds them.
         const workspaceStrategy =
           input.bindToCurrentThread === undefined
             ? existing.workspaceStrategy
-            : scheduledTaskWorkspaceStrategy(input.bindToCurrentThread);
+            : scheduledTaskWorkspaceStrategy(
+                input.bindToCurrentThread,
+                parent?.thread.projectId === existing.projectId ? parent.thread : undefined,
+              );
         const upsertInput: ScheduledTaskUpsertInput = {
           id: existing.id,
           title: input.title ?? existing.title,

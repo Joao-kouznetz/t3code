@@ -11,6 +11,7 @@ import {
 import {
   scheduledTaskDefaultModel,
   createDraft,
+  draftFromPrompt,
   editDraft,
   DEFAULT_SCHEDULE,
   hasScheduledTaskDraftChanges,
@@ -352,4 +353,29 @@ describe("scheduled task model defaults", () => {
       ),
     ).toBeNull();
   });
+});
+
+it("opens a prompt as a new recurring task with its model options, workspace, and modes", () => {
+  const modelSelection = {
+    instanceId: ProviderInstanceId.make("remote-custom-provider"),
+    model: "selected-model",
+    options: [{ id: "reasoning", value: "high" }],
+  };
+  const draft = draftFromPrompt({
+    prompt: "Review this project every morning",
+    projectId: ProjectId.make("remote-project"),
+    modelSelection,
+    runtimeMode: "approval-required",
+    interactionMode: "plan",
+    workspaceStrategy: { type: "existing_worktree", worktreePath: "/repos/specific-checkout" },
+  });
+  expect(draft.task).toBeNull();
+  expect(draft.modelSelection).toEqual(modelSelection);
+  expect(draft.modelSelectionIsExplicit).toBe(true);
+  expect(draft.projectId).toBe("remote-project");
+  expect(draft.workspace).toBe("existing_worktree");
+  expect(draft.checkoutPath).toBe("/repos/specific-checkout");
+  expect(draft.runtimeMode).toBe("approval-required");
+  expect(draft.interactionMode).toBe("plan");
+  expect(hasScheduledTaskDraftChanges(draft, { ...draft, interactionMode: "default" })).toBe(true);
 });

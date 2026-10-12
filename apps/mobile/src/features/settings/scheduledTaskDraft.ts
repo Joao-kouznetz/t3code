@@ -1,8 +1,13 @@
+import {
+  scheduledTaskPromptDraft,
+  type ScheduledTaskPromptSource,
+} from "@t3tools/client-runtime/scheduled-tasks";
 import type {
   ModelSelection,
   ServerConfig,
   ProjectId,
   RuntimeMode,
+  ProviderInteractionMode,
   ScheduledTask,
   ScheduledTaskUpsertSchedule,
   ScheduledTaskWebhookSignature,
@@ -146,6 +151,7 @@ export type ScheduledTaskDraft = {
   readonly enabled: boolean;
   readonly startFromOrigin: boolean;
   readonly runtimeMode: RuntimeMode;
+  readonly interactionMode: ProviderInteractionMode;
 };
 
 function draftSignature(draft: ScheduledTaskDraft): string {
@@ -169,6 +175,7 @@ function draftSignature(draft: ScheduledTaskDraft): string {
     draft.enabled,
     draft.startFromOrigin,
     draft.runtimeMode,
+    draft.interactionMode,
   ]);
 }
 
@@ -197,6 +204,7 @@ export function createDraft(
     enabled: true,
     startFromOrigin: true,
     runtimeMode: "full-access",
+    interactionMode: "default",
   };
 }
 
@@ -221,5 +229,23 @@ export function editDraft(task: ScheduledTask): ScheduledTaskDraft {
         ? (task.workspaceStrategy.startFromOrigin ?? false)
         : true,
     runtimeMode: task.runtimeMode,
+    interactionMode: task.interactionMode,
+  };
+}
+
+export function draftFromPrompt(source: ScheduledTaskPromptSource): ScheduledTaskDraft {
+  const seed = scheduledTaskPromptDraft(source);
+  const workspace = seed.workspaceStrategy;
+  return {
+    ...createDraft(seed.projectId, seed.modelSelection),
+    title: seed.title,
+    prompt: seed.prompt,
+    modelSelectionIsExplicit: true,
+    runtimeMode: seed.runtimeMode,
+    interactionMode: seed.interactionMode,
+    workspace: workspace.type,
+    baseRef: workspace.type === "worktree" ? workspace.baseRef : "main",
+    startFromOrigin: workspace.type === "worktree" && (workspace.startFromOrigin ?? false),
+    checkoutPath: workspace.type === "existing_worktree" ? workspace.worktreePath : "",
   };
 }

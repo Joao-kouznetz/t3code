@@ -1,3 +1,4 @@
+import { useOpenScheduledTasks } from "../home/useOpenScheduledTasks";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { use, useCallback, useEffect, useRef } from "react";
 import { Platform } from "react-native";
@@ -17,6 +18,7 @@ export function WorkspaceToolbar(props: {
 }) {
   const workspace = useWorkspaceTabs()!;
   const navigation = useNavigation();
+  const openScheduledTasks = useOpenScheduledTasks();
   const metrics = useNativeLayoutMetrics();
   const nativeToolbarCompose =
     Platform.OS === "ios" && (Platform.isPad || (metrics?.verticalBarEdge ?? "none") !== "none");
@@ -92,6 +94,11 @@ export function WorkspaceToolbar(props: {
       />
       {/* UIKit lays trailing items out from the edge inward. */}
       <NativeHeaderToolbar placement="right">
+        <NativeHeaderToolbar.Button
+          accessibilityLabel="Scheduled tasks"
+          icon="clock"
+          onPress={openScheduledTasks}
+        />
         <NativeHeaderToolbar.Button
           accessibilityLabel="Settings"
           icon="gearshape"

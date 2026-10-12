@@ -32,6 +32,7 @@ import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
@@ -2704,4 +2705,66 @@ it.effect("replays an accepted message.dispatch after the project disables the i
       assert.fail(`expected ThreadManagementProviderInstanceDisabledError, got ${fresh._tag}`);
     }
   }).pipe(Effect.provide(Layer.mergeAll(harness.layer, layerFiles)));
+});
+
+it.effect("each automatic recurrence creates a fresh top-level unsettled thread", () => {
+  const harness = makeHarness();
+  const layerScheduledTasks = ScheduledTasks.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        harness.layer,
+        NodeCrypto.layer,
+        Scheduler.layer,
+        Layer.mock(SecretRequests.SecretRequests)({}),
+      ),
+    ),
+  );
+  return Effect.gen(function* () {
+    const tasks = yield* ScheduledTasks.ScheduledTaskService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const { task } = yield* tasks.upsert({
+      title: "Recurring project audit",
+      prompt: "Audit the project and report regressions.",
+      enabled: true,
+      schedule: { type: "interval", everyMs: 60_000 },
+      projectId,
+      workspaceStrategy: { type: "root" },
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      createdBy: "agent",
+      creationSource: "mcp",
+    });
+    for (const runCount of [1, 2]) {
+      const completed = yield* tasks.subscribeList().pipe(
+        Stream.filter((list) =>
+          list.tasks.some(
+            (entry) =>
+              entry.id === task.id &&
+              entry.runCount >= runCount &&
+              entry.lastRunStatus === "succeeded",
+          ),
+        ),
+        Stream.runHead,
+        Effect.forkChild,
+      );
+      yield* TestClock.adjust("65 seconds");
+      yield* Fiber.join(completed);
+    }
+    const listed = yield* tasks.list();
+    assert.equal(listed.tasks[0]?.runCount, 2);
+    assert.equal(listed.tasks[0]?.threadId, null);
+    const created = yield* threads.listProjectThreads({ projectId, includeSubagents: false });
+    assert.equal(created.length, 2);
+    assert.notEqual(created[0]?.id, created[1]?.id);
+    for (const thread of created) {
+      assert.equal(thread.settledOverride, null);
+      assert.equal(thread.archivedAt, null);
+      assert.equal(thread.lineage.parentThreadId, null);
+      const projection = yield* threads.getThreadProjection(thread.id);
+      const wire = yield* encodeThreadProjection(projection);
+      assert.equal(wire.messages[0]?.text, task.prompt);
+      assert.equal(wire.messages[0]?.scheduledTaskId, task.id);
+    }
+  }).pipe(Effect.provide(Layer.mergeAll(harness.layer, layerScheduledTasks)));
 });

@@ -23,6 +23,12 @@ import type {
   ScheduledTaskWebhookDeliverySummary,
   ThreadId,
 } from "@t3tools/contracts";
+import {
+  groupScheduledTasksByProject,
+  scheduledTaskPromptDraft,
+  type ScheduledTaskPromptSource,
+} from "@t3tools/client-runtime/scheduled-tasks";
+import type { ResolvedSettingsScope } from "./settingsScope";
 import { DEFAULT_WEBHOOK_PROMPT } from "@t3tools/client-runtime/scheduled-task-webhook";
 import {
   MAX_WEBHOOK_DELIVERY_AGE_MINUTES,
@@ -50,6 +56,7 @@ import { Link } from "@tanstack/react-router";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import {
   useEnvironment,
+  useEnvironments,
   useEnvironmentHttpBaseUrl,
   type EnvironmentPresentation,
 } from "../../state/environments";
@@ -308,6 +315,7 @@ export function ScheduledTasksSettings(target: {
         <ScheduledTaskEditorDialog
           key={`${editor.environmentId}:${editor.task?.id ?? "new"}`}
           initialEnvironmentId={editor.environmentId}
+          scope={scope}
           task={editor.task}
           onClose={() => setEditor(null)}
         />
@@ -328,6 +336,7 @@ function ScheduledTaskEnvironmentSection({
   readonly onEdit: (environmentId: EnvironmentId, task: ScheduledTask) => void;
 }) {
   const { scope } = useSettingsScope();
+  const projects = useProjects();
   const connected =
     environment.connection.phase === "connected" && environment.serverConfig !== null;
   const tasksQuery = useEnvironmentQuery(
@@ -385,13 +394,26 @@ function ScheduledTaskEnvironmentSection({
               description="No tasks match this environment and project selection."
             />
           ) : (
-            tasks.map((task) => (
-              <ScheduledTaskRow
-                key={task.id}
-                environmentId={environment.environmentId}
-                task={task}
-                onEdit={() => onEdit(environment.environmentId, task)}
-              />
+            groupScheduledTasksByProject(tasks).map((group) => (
+              <SettingsSection
+                key={group.projectId}
+                title={
+                  projects.find(
+                    (project) =>
+                      project.environmentId === environment.environmentId &&
+                      project.id === group.projectId,
+                  )?.title ?? "Unavailable project"
+                }
+              >
+                {group.tasks.map((task) => (
+                  <ScheduledTaskRow
+                    key={task.id}
+                    environmentId={environment.environmentId}
+                    task={task}
+                    onEdit={() => onEdit(environment.environmentId, task)}
+                  />
+                ))}
+              </SettingsSection>
             ))
           )}
         </>
@@ -768,16 +790,26 @@ function WebhookDeliveryMode({ environmentId }: { readonly environmentId: Enviro
   );
 }
 
-function ScheduledTaskEditorDialog({
+export function ScheduledTaskEditorDialog({
   initialEnvironmentId,
   task,
+  scope,
+  initialPrompt,
   onClose,
 }: {
   readonly initialEnvironmentId: EnvironmentId;
   readonly task: ScheduledTask | null;
+  readonly scope?: ResolvedSettingsScope;
+  readonly initialPrompt?: ScheduledTaskPromptSource;
   readonly onClose: () => void;
 }) {
-  const { scope, connectedEnvironments } = useSettingsScope();
+  const { environments } = useEnvironments();
+  const connectedEnvironments = environments.filter(
+    (entry) =>
+      entry.connection.phase === "connected" &&
+      entry.serverConfig !== null &&
+      (scope === undefined || scope.environmentIds.includes(entry.environmentId)),
+  );
   const [environmentId, setEnvironmentId] = useState(initialEnvironmentId);
   const environment = useEnvironment(environmentId);
   const connected =
@@ -791,7 +823,7 @@ function ScheduledTaskEditorDialog({
       allProjects.filter(
         (project) =>
           project.environmentId === environmentId &&
-          matchesScheduledTaskScope(scope, environmentId, project.id),
+          (scope === undefined || matchesScheduledTaskScope(scope, environmentId, project.id)),
       ),
     [allProjects, environmentId, scope],
   );
@@ -804,9 +836,26 @@ function ScheduledTaskEditorDialog({
   const upsertTask = useAtomCommand(serverEnvironment.upsertScheduledTask, {
     label: "scheduled task upsert",
   });
-  const [draft, setDraft] = useState<DraftState>(() =>
-    task ? taskToDraft(task) : { ...EMPTY_DRAFT, projectId: projects[0]?.id ?? "" },
-  );
+  const [draft, setDraft] = useState<DraftState>(() => {
+    if (task) return taskToDraft(task);
+    if (!initialPrompt) return { ...EMPTY_DRAFT, projectId: projects[0]?.id ?? "" };
+    const seed = scheduledTaskPromptDraft(initialPrompt);
+    const workspace = seed.workspaceStrategy;
+    return {
+      ...EMPTY_DRAFT,
+      title: seed.title,
+      prompt: seed.prompt,
+      projectId: seed.projectId,
+      modelKey: `${seed.modelSelection.instanceId}:${seed.modelSelection.model}`,
+      baseModelSelection: seed.modelSelection,
+      runtimeMode: seed.runtimeMode,
+      interactionMode: seed.interactionMode,
+      workspaceMode: workspace.type,
+      baseRef: workspace.type === "worktree" ? workspace.baseRef : "main",
+      startFromOrigin: workspace.type === "worktree" && (workspace.startFromOrigin ?? false),
+      existingWorktreePath: workspace.type === "existing_worktree" ? workspace.worktreePath : "",
+    };
+  });
   const [saving, setSaving] = useState(false);
   const submissionPending = useRef(false);
   const editingTaskMissing =
@@ -969,7 +1018,8 @@ function ScheduledTaskEditorDialog({
           <DialogTitle>{draft.editingId ? "Edit task" : "New task"}</DialogTitle>
           <DialogDescription>
             Run a prompt automatically — on an interval, at a fixed time, or when a webhook is
-            called.
+            called. Each run creates a new thread in the project unless this task is bound to a
+            thread. The selected machine must be awake with its T3 server running.
           </DialogDescription>
         </DialogHeader>
 

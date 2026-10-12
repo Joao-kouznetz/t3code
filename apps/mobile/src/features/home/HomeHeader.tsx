@@ -1,3 +1,4 @@
+import { useOpenScheduledTasks } from "./useOpenScheduledTasks";
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
 import { use, useCallback, useEffect, useRef } from "react";
 import { useNavigation, type ParamListBase } from "@react-navigation/native";
@@ -18,6 +19,7 @@ import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 export type { HomeHeaderEnvironment } from "./HomeHeader.types";
 
 export function HomeHeader(props: HomeHeaderProps) {
+  const openScheduledTasks = useOpenScheduledTasks();
   const navigation = useNavigation<NativeStackNavigationProp<ParamListBase>>();
   const { layout, panes, togglePrimarySidebar } = useAdaptiveWorkspaceLayout();
   const usesNativeMailSearchToolbar = useNativeMailSearchToolbar();
@@ -69,8 +71,16 @@ export function HomeHeader(props: HomeHeaderProps) {
           // Static header config (glass, title, fonts) lives in Stack.tsx
           // (GLASS_HEADER_OPTIONS). Only dynamic values are set here.
           headerTintColor: iconColor,
-          unstable_headerRightItems: () =>
-            sidebarHeader
+          unstable_headerRightItems: () => [
+            withNativeGlassHeaderItem({
+              accessibilityLabel: "Scheduled tasks",
+              icon: { name: "clock", type: "sfSymbol" } as const,
+              identifier: "home-scheduled-tasks",
+              label: "",
+              onPress: openScheduledTasks,
+              type: "button",
+            }),
+            ...(sidebarHeader
               ? [
                   ...createSidebarHeaderItems({
                     filterIcon: hasCustomListOptions
@@ -102,7 +112,8 @@ export function HomeHeader(props: HomeHeaderProps) {
                     onPress: props.onOpenSettings,
                     type: "button",
                   }),
-                ],
+                ]),
+          ],
           // The keys below are set per-branch (not `undefined`) so a later
           // reapply cannot clobber options owned by NativeHeaderToolbar.
           ...(sidebarHeader

@@ -1,3 +1,4 @@
+import type { ScheduledTaskPromptSource } from "@t3tools/client-runtime/scheduled-tasks";
 import { useAtomValue } from "@effect/atom-react";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
@@ -49,6 +50,7 @@ import {
   ComposerActionButton,
   ComposerInlineControl,
   ComposerToolbarRow,
+  ComposerToolbarButton,
 } from "../../components/ComposerToolbar";
 import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
 import { MaterialScreenContent } from "../../components/MaterialScreenContent";
@@ -1645,6 +1647,46 @@ export function NewTaskDraftScreen(props: {
     </View>
   );
 
+  const canSchedulePrompt =
+    environmentConnected &&
+    canOperate &&
+    !isComposerInteractionLocked &&
+    !voiceInput.isBusy &&
+    !modelUnavailable &&
+    flow.selectedModel !== null &&
+    flow.prompt.trim().length > 0 &&
+    flow.attachments.length === 0 &&
+    !flow.editingPendingTask &&
+    !cloneBlocksStart &&
+    pendingPastedTextAttachmentCount === 0;
+  const schedulePrompt = () => {
+    if (!canSchedulePrompt || !selectedProject || !flow.selectedModel) return;
+    promptInputRef.current?.blur();
+    const source: ScheduledTaskPromptSource = {
+      prompt: flow.prompt,
+      projectId: selectedProject.id,
+      modelSelection: flow.selectedModel,
+      runtimeMode: flow.runtimeMode,
+      interactionMode: flow.interactionMode,
+      workspaceStrategy:
+        flow.selectedWorktreePath !== null
+          ? { type: "existing_worktree", worktreePath: flow.selectedWorktreePath }
+          : flow.workspaceMode === "worktree"
+            ? {
+                type: "worktree",
+                baseRef: selectedBranchName ?? "main",
+                startFromOrigin: flow.startFromOrigin,
+              }
+            : { type: "root" },
+    };
+    navigation.navigate("SettingsSheet", {
+      screen: "SettingsContent",
+      params: {
+        screen: "SettingsScheduledTaskNew",
+        params: { promptSource: { environmentId: selectedProject.environmentId, source } },
+      },
+    });
+  };
   const composerDock = (
     <View
       className={
@@ -1775,6 +1817,13 @@ export function NewTaskDraftScreen(props: {
                 />
               ) : (
                 <>
+                  <ComposerToolbarButton
+                    accessibilityLabel="Make prompt a recurring task"
+                    disabled={!canSchedulePrompt}
+                    icon="clock"
+                    onPress={schedulePrompt}
+                    showChevron={false}
+                  />
                   <ComposerAttachmentButton
                     disabled={isComposerInteractionLocked}
                     supportsFiles={Boolean(

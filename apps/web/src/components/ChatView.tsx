@@ -1,3 +1,4 @@
+import type { ScheduledTaskPromptSource } from "@t3tools/client-runtime/scheduled-tasks";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
 import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
@@ -701,6 +702,11 @@ function useDraftHeroLayoutTransition(
   } as const;
 }
 
+const ScheduledTaskEditorDialog = lazy(() =>
+  import("./settings/ScheduledTasksSettings").then((module) => ({
+    default: module.ScheduledTaskEditorDialog,
+  })),
+);
 const PreviewPanel = lazy(() =>
   import("./preview/PreviewPanel").then((module) => ({ default: module.PreviewPanel })),
 );
@@ -6984,6 +6990,34 @@ export default function ChatView(props: ChatViewProps) {
     requestedEnvMode: envMode,
     isGitRepo,
   });
+  const [scheduledPrompt, setScheduledPrompt] = useState<{
+    environmentId: EnvironmentId;
+    source: ScheduledTaskPromptSource;
+  } | null>(null);
+  const schedulePrompt = () => {
+    const context = composerRef.current?.getSendContext();
+    if (!activeProject || !activeThread || !context || !context.prompt.trim()) return;
+    setScheduledPrompt({
+      environmentId: activeThread.environmentId,
+      source: {
+        prompt: context.prompt,
+        projectId: activeProject.id,
+        modelSelection: context.selectedModelSelection,
+        runtimeMode,
+        interactionMode: context.interactionMode,
+        workspaceStrategy:
+          activeWorktreePath !== null
+            ? { type: "existing_worktree", worktreePath: activeWorktreePath }
+            : sendEnvMode === "worktree"
+              ? {
+                  type: "worktree",
+                  baseRef: activeThreadBranch ?? "main",
+                  startFromOrigin,
+                }
+              : { type: "root" },
+      },
+    });
+  };
   const localCheckoutBranchMismatch = useMemo(
     () =>
       isServerThread
@@ -11700,6 +11734,7 @@ export default function ChatView(props: ChatViewProps) {
                           {!composerMounted ? null : (
                             <ChatComposer
                               canOperateThread={canOperateThread}
+                              onSchedulePrompt={isLocalDraftThread ? schedulePrompt : undefined}
                               reportedModelSelection={reportedModelSelection}
                               multipleModelSelections={multipleModelSelections}
                               supportsMultipleModels={
@@ -12174,6 +12209,16 @@ export default function ChatView(props: ChatViewProps) {
           </AlertDialogFooter>
         </AlertDialogPopup>
       </AlertDialog>
+      {scheduledPrompt ? (
+        <Suspense fallback={null}>
+          <ScheduledTaskEditorDialog
+            initialEnvironmentId={scheduledPrompt.environmentId}
+            initialPrompt={scheduledPrompt.source}
+            task={null}
+            onClose={() => setScheduledPrompt(null)}
+          />
+        </Suspense>
+      ) : null}
       <LinkPullRequestDialogHost />
       {expandedImage && (
         <ExpandedImageDialog

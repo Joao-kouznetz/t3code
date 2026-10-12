@@ -1,3 +1,7 @@
+import {
+  groupScheduledTasksByProject,
+  type ScheduledTaskPromptSource,
+} from "@t3tools/client-runtime/scheduled-tasks";
 import { useAtomValue } from "@effect/atom-react";
 import {
   AuthOrchestrationOperateScope,
@@ -34,7 +38,12 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useFocusEffect, useNavigation, usePreventRemove } from "@react-navigation/native";
+import {
+  useFocusEffect,
+  useNavigation,
+  usePreventRemove,
+  type StaticScreenProps,
+} from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { Alert, AppState, Platform, Pressable, TextInput as RNTextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -72,6 +81,7 @@ import { SettingsSection } from "./components/SettingsSection";
 import { useSettingsEnvironmentFilter, type SettingsTarget } from "./settings-environment-filter";
 import {
   editDraft,
+  draftFromPrompt,
   scheduledTaskDefaultModel,
   scheduleFromDraft,
   type ScheduledTaskDraft as Draft,
@@ -262,7 +272,15 @@ function PickerRow(props: {
   );
 }
 
-export function SettingsScheduledTasksRouteScreen() {
+export function SettingsScheduledTasksRouteScreen({
+  route,
+}: StaticScreenProps<
+  | {
+      readonly environmentId?: EnvironmentId;
+      readonly projectKey?: string | null;
+    }
+  | undefined
+>) {
   const [now, setNow] = useState(Date.now);
   useFocusEffect(
     useCallback(() => {
@@ -278,8 +296,19 @@ export function SettingsScheduledTasksRouteScreen() {
       };
     }, []),
   );
-  const { availableTargets, selectedTargets, selectedProjectKey, projectGroups } =
-    useSettingsEnvironmentFilter();
+  const {
+    availableTargets,
+    selectedTargets,
+    selectedProjectKey,
+    projectGroups,
+    selectProject,
+    selectEnvironment,
+  } = useSettingsEnvironmentFilter();
+  useLayoutEffect(() => {
+    if (route.params === undefined) return;
+    selectEnvironment(route.params.environmentId ?? null);
+    selectProject(route.params.projectKey ?? null);
+  }, [route.params, selectEnvironment, selectProject]);
   const selectedGroup = projectGroups.find((group) => group.key === selectedProjectKey);
   const visibleEnvironments = settingsTargetsForProject(
     selectedTargets,
@@ -373,15 +402,36 @@ export function SettingsScheduledTasksRouteScreen() {
   );
 }
 
-export function SettingsScheduledTaskNewRouteScreen() {
-  const { resetEditor } = useScheduledTaskEditor();
+export function SettingsScheduledTaskNewRouteScreen({
+  route,
+}: StaticScreenProps<
+  | {
+      readonly promptSource?: {
+        readonly environmentId: EnvironmentId;
+        readonly source: ScheduledTaskPromptSource;
+      };
+    }
+  | undefined
+>) {
+  const { resetEditor, startEditor } = useScheduledTaskEditor();
   const { availableTargets } = useSettingsEnvironmentFilter();
   const initialized = useRef(false);
   useLayoutEffect(() => {
     if (initialized.current || availableTargets.length === 0) return;
     initialized.current = true;
-    resetEditor();
-  }, [availableTargets.length, resetEditor]);
+    const target = route.params?.promptSource;
+    if (target) {
+      startEditor({
+        environmentId: target.environmentId,
+        environmentLabel:
+          availableTargets.find((entry) => entry.environmentId === target.environmentId)?.label ??
+          "Unavailable environment",
+        draft: draftFromPrompt(target.source),
+      });
+    } else {
+      resetEditor();
+    }
+  }, [availableTargets, resetEditor, route.params, startEditor]);
   return <SettingsScheduledTaskEditorScreen title="New scheduled task" />;
 }
 
@@ -678,7 +728,7 @@ function TaskForm({
                 startFromOrigin: draft.startFromOrigin,
               },
       runtimeMode: draft.runtimeMode,
-      interactionMode: draft.task?.interactionMode ?? "default",
+      interactionMode: draft.interactionMode,
       creationSource: draft.task?.creationSource ?? "mobile",
     };
     // Lock before React renders, and keep successful creates locked until the form closes.
@@ -1137,6 +1187,7 @@ function EnvironmentTasks({
   readonly onEdit: (task: ScheduledTask) => void;
 }) {
   const environmentId = environment.environmentId;
+  const projects = useProjects();
   const tasks = useEnvironmentQuery(
     serverEnvironment.scheduledTasksLive({ environmentId, input: {} }),
   );
@@ -1197,88 +1248,101 @@ function EnvironmentTasks({
           {projectIds === null ? "No scheduled tasks yet." : "No tasks in this project."}
         </Text>
       ) : (
-        visibleTasks?.map((task, index) => (
-          <View
-            key={task.id}
-            className={
-              index === 0
-                ? "flex-row items-start gap-1 px-4 py-4"
-                : "flex-row items-start gap-1 border-t border-border-subtle px-4 py-4"
-            }
-          >
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Edit ${task.title}`}
-              onPress={() => {
-                onEdit(task);
-              }}
-              className="min-w-0 flex-1 gap-1 active:opacity-70"
-            >
-              <Text className="text-lg font-t3-medium text-foreground" numberOfLines={1}>
-                {task.title}
-              </Text>
-              <Text className="text-sm text-foreground-muted" numberOfLines={2}>
-                {describeSchedule(task)}
-                {!task.enabled
-                  ? " · Paused"
-                  : task.nextRunAt
-                    ? ` · ${formatNextScheduledTaskRun(task.nextRunAt, now)}`
-                    : ""}
-              </Text>
-              {task.lastRunError ? (
-                <Text className="text-sm text-danger-foreground" numberOfLines={2}>
-                  Last run failed: {task.lastRunError}
-                </Text>
-              ) : null}
-            </Pressable>
-            <ControlPillMenu
-              actions={[
-                { id: "edit", title: "Edit" },
-                {
-                  id: "toggle",
-                  title: task.enabled ? "Pause" : "Resume",
-                  attributes: { disabled: !canOperate },
-                },
-                ...(task.schedule.type === "webhook"
-                  ? []
-                  : [{ id: "run", title: "Run now", attributes: { disabled: !canOperate } }]),
-                {
-                  id: "delete",
-                  title: "Delete",
-                  attributes: { destructive: true, disabled: !canOperate },
-                },
-              ]}
-              onPressAction={({ nativeEvent }) => {
-                const action = nativeEvent.event;
-                if (action === "edit") {
-                  onEdit(task);
-                } else if (action === "delete") {
-                  Alert.alert("Delete task?", task.title, [
-                    { text: "Cancel", style: "cancel" },
-                    {
-                      text: "Delete",
-                      style: "destructive",
-                      onPress: () => void act(task, "delete"),
-                    },
-                  ]);
-                } else if (action === "toggle" || action === "run") {
-                  void act(task, action);
+        groupScheduledTasksByProject(visibleTasks ?? []).map((group) => (
+          <View key={group.projectId}>
+            <Text className="px-4 pt-4 text-sm font-t3-medium text-foreground-muted">
+              {projects.find(
+                (project) =>
+                  project.environmentId === environmentId && project.id === group.projectId,
+              )?.title ?? "Unavailable project"}
+            </Text>
+            {group.tasks.map((task, index) => (
+              <View
+                key={task.id}
+                className={
+                  index === 0
+                    ? "flex-row items-start gap-1 px-4 py-4"
+                    : "flex-row items-start gap-1 border-t border-border-subtle px-4 py-4"
                 }
-              }}
-            >
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Actions for ${task.title}`}
-                className="h-11 w-11 items-center justify-center"
               >
-                <SymbolView
-                  name="ellipsis"
-                  size={18}
-                  tintColorClassName="accent-icon"
-                  type="monochrome"
-                />
-              </Pressable>
-            </ControlPillMenu>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Edit ${task.title}`}
+                  onPress={() => {
+                    onEdit(task);
+                  }}
+                  className="min-w-0 flex-1 gap-1 active:opacity-70"
+                >
+                  <Text className="text-lg font-t3-medium text-foreground" numberOfLines={1}>
+                    {task.title}
+                  </Text>
+                  <Text className="text-sm text-foreground-muted" numberOfLines={2}>
+                    {describeSchedule(task)}
+                    {!task.enabled
+                      ? " · Paused"
+                      : task.nextRunAt
+                        ? ` · ${formatNextScheduledTaskRun(task.nextRunAt, now)}`
+                        : ""}
+                  </Text>
+                  <Text className="text-sm text-foreground-muted" numberOfLines={2}>
+                    {task.prompt}
+                  </Text>
+                  {task.lastRunError ? (
+                    <Text className="text-sm text-danger-foreground" numberOfLines={2}>
+                      Last run failed: {task.lastRunError}
+                    </Text>
+                  ) : null}
+                </Pressable>
+                <ControlPillMenu
+                  actions={[
+                    { id: "edit", title: "Edit" },
+                    {
+                      id: "toggle",
+                      title: task.enabled ? "Pause" : "Resume",
+                      attributes: { disabled: !canOperate },
+                    },
+                    ...(task.schedule.type === "webhook"
+                      ? []
+                      : [{ id: "run", title: "Run now", attributes: { disabled: !canOperate } }]),
+                    {
+                      id: "delete",
+                      title: "Delete",
+                      attributes: { destructive: true, disabled: !canOperate },
+                    },
+                  ]}
+                  onPressAction={({ nativeEvent }) => {
+                    const action = nativeEvent.event;
+                    if (action === "edit") {
+                      onEdit(task);
+                    } else if (action === "delete") {
+                      Alert.alert("Delete task?", task.title, [
+                        { text: "Cancel", style: "cancel" },
+                        {
+                          text: "Delete",
+                          style: "destructive",
+                          onPress: () => void act(task, "delete"),
+                        },
+                      ]);
+                    } else if (action === "toggle" || action === "run") {
+                      void act(task, action);
+                    }
+                  }}
+                >
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Actions for ${task.title}`}
+                    className="h-11 w-11 items-center justify-center"
+                  >
+                    <SymbolView
+                      name="ellipsis"
+                      size={18}
+                      tintColorClassName="accent-icon"
+                      type="monochrome"
+                    />
+                  </Pressable>
+                </ControlPillMenu>
+              </View>
+            ))}
           </View>
         ))
       )}

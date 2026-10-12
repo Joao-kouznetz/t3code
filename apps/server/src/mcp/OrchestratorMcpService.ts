@@ -1615,7 +1615,9 @@ const make = Effect.gen(function* () {
         yield* assertLiveCallerForOtherProject(scope, parent, projectId);
         const project = yield* requireProject(projectId);
         // Binding means "wake this thread", which only a thread caller in that project has.
-        const bindToCurrentThread = input.bindToCurrentThread ?? false;
+        const bindToCurrentThread =
+          input.bindToCurrentThread ??
+          (parent !== undefined && parent.thread.projectId === projectId);
         if (
           bindToCurrentThread &&
           (parent === undefined || parent.thread.projectId !== projectId)

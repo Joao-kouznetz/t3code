@@ -74,10 +74,12 @@ task** to open the schedule editor with that prompt, project, model options,
 and workspace settings. This shortcut accepts a text prompt with one model;
 remove attachments before scheduling.
 
-Each run creates a new thread in the project's unsettled list. Agents can also
-create and manage schedules through their T3 tools when you ask them to make a
-task recurring. Posting each run into the same conversation is an explicit
-option for agent-created tasks. Existing schedules keep their thread binding.
+Tasks created from the prompt shortcut create a new thread in the project's
+unsettled list on each run. Agents can also create and manage schedules through
+their T3 tools when you ask them to make a task recurring. In the calling
+thread's project, agent-created tasks post into that conversation by default;
+the agent can explicitly request a fresh thread per run. Existing schedules
+keep their thread binding.
 The chosen machine must be awake and its T3 server running; closing a remote
 client does not stop the scheduler.
 

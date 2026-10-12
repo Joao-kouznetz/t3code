@@ -26,7 +26,7 @@ it.effect.each(
     [null, "release"].map((branch) => ({ bindToCurrentThread, branch })),
   ),
 )(
-  "schedule_task binding $bindToCurrentThread on branch $branch launches fresh threads unless requested",
+  "schedule_task preserves binding $bindToCurrentThread defaults on branch $branch",
   ({ bindToCurrentThread, branch }) => {
     const parent = {
       ...liveThreadShell(ThreadId.make("caller"), {
@@ -106,14 +106,15 @@ it.effect.each(
         schedule: { type: "interval", everyMs: 60_000 },
         ...(bindToCurrentThread === undefined ? {} : { bindToCurrentThread }),
       });
-      assert.equal(task.boundThreadId, bindToCurrentThread === true ? parent.id : null);
+      const bound = bindToCurrentThread ?? true;
+      assert.equal(task.boundThreadId, bound ? parent.id : null);
       assert.equal(saved?.projectId, parent.projectId);
       assert.deepEqual(saved?.modelSelection, parent.modelSelection);
       assert.equal(saved?.runtimeMode, "approval-required");
       assert.equal(saved?.interactionMode, "plan");
       assert.deepEqual(
         saved?.workspaceStrategy,
-        bindToCurrentThread === true || branch === null
+        bound || branch === null
           ? { type: "root" }
           : { type: "worktree", baseRef: branch, startFromOrigin: false },
       );

@@ -1,0 +1,122 @@
+name: Sync upstream
+
+# Keeps this fork's main aligned with pingdotgg/t3code.
+# Every other workflow stays disabled so the fork does not deploy,
+# publish releases, or run the upstream CI.
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Sync main and keep other workflows off
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          repo="${GITHUB_REPOSITORY}"
+
+          disable_others() {
+            gh api --paginate "repos/${repo}/actions/workflows" \
+              --jq '.workflows[] | select(.path != ".github/workflows/sync-upstream.yml" and .state == "active") | .id' |
+              while read -r id; do
+                [ -z "${id}" ] && continue
+                gh api --method PUT "repos/${repo}/actions/workflows/${id}/disable" >/dev/null || true
+              done
+          }
+
+          ensure_self_enabled() {
+            state=$(gh api "repos/${repo}/actions/workflows/sync-upstream.yml" --jq .state)
+            echo "sync-upstream state: ${state}"
+            if [ "${state}" != "active" ]; then
+              id=$(gh api "repos/${repo}/actions/workflows/sync-upstream.yml" --jq .id)
+              gh api --method PUT "repos/${repo}/actions/workflows/${id}/enable" >/dev/null
+              echo "Enabled sync-upstream."
+            fi
+          }
+
+          disable_others
+
+          set +e
+          api_out=$(gh api --method POST "repos/${repo}/merge-upstream" -f branch=main 2>&1)
+          api_code=$?
+          set -e
+          printf '%s\n' "${api_out}"
+
+          api_ok=0
+          if [ "${api_code}" -eq 0 ] || printf '%s' "${api_out}" | grep -qiE 'not behind|already up to date|up-to-date'; then
+            if gh api "repos/${repo}/contents/.github/workflows/sync-upstream.yml?ref=main" --jq .path >/dev/null 2>&1; then
+              api_ok=1
+            else
+              echo "Upstream API sync did not leave the sync workflow in place."
+            fi
+          fi
+
+          if [ "${api_ok}" -eq 1 ]; then
+            echo "Fork main is synced with pingdotgg/t3code."
+            disable_others
+            ensure_self_enabled
+            exit 0
+          fi
+
+          echo "Updating main with git."
+          gh auth setup-git
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          work=$(mktemp -d)
+          git clone --bare --filter=blob:none "https://github.com/pingdotgg/t3code.git" "${work}/upstream.git"
+          git clone --bare --filter=blob:none "https://github.com/${repo}.git" "${work}/fork.git"
+          git --git-dir="${work}/fork.git" fetch "${work}/upstream.git" "refs/heads/main:refs/heads/upstream-main"
+
+          upstream=$(git --git-dir="${work}/fork.git" rev-parse refs/heads/upstream-main)
+          fork=$(git --git-dir="${work}/fork.git" rev-parse refs/heads/main)
+          base=$(git --git-dir="${work}/fork.git" merge-base "${upstream}" "${fork}")
+
+          if ! git --git-dir="${work}/fork.git" diff --quiet "${base}" "${fork}" -- . ':(exclude).github/workflows/sync-upstream.yml'; then
+            echo "Fork main has commits other than the sync workflow. Not overwriting."
+            disable_others
+            ensure_self_enabled
+            exit 1
+          fi
+
+          if git --git-dir="${work}/fork.git" diff --quiet "${upstream}" "${fork}" -- . ':(exclude).github/workflows/sync-upstream.yml' \
+            && git --git-dir="${work}/fork.git" cat-file -e "${fork}:.github/workflows/sync-upstream.yml" 2>/dev/null; then
+            echo "Fork main already matches upstream, plus the sync workflow."
+            disable_others
+            ensure_self_enabled
+            exit 0
+          fi
+
+          git --git-dir="${work}/fork.git" show "${fork}:.github/workflows/sync-upstream.yml" > "${work}/sync-upstream.yml"
+          blob=$(git --git-dir="${work}/fork.git" hash-object -w "${work}/sync-upstream.yml")
+          index="${work}/index"
+          GIT_INDEX_FILE="${index}" git --git-dir="${work}/fork.git" read-tree "${upstream}"
+          GIT_INDEX_FILE="${index}" git --git-dir="${work}/fork.git" update-index --add --cacheinfo "100644,${blob},.github/workflows/sync-upstream.yml"
+          tree=$(GIT_INDEX_FILE="${index}" git --git-dir="${work}/fork.git" write-tree)
+          commit=$(git --git-dir="${work}/fork.git" commit-tree "${tree}" -p "${upstream}" \
+            -m "Keep this fork synced with pingdotgg/t3code." \
+            -m "This commit only keeps .github/workflows/sync-upstream.yml on the fork.")
+
+          if git --git-dir="${work}/fork.git" merge-base --is-ancestor "${fork}" "${commit}"; then
+            git --git-dir="${work}/fork.git" push origin "${commit}:refs/heads/main"
+          else
+            git --git-dir="${work}/fork.git" push --force-with-lease="refs/heads/main:${fork}" origin "${commit}:refs/heads/main"
+          fi
+          echo "Pushed ${commit}"
+
+          disable_others
+          ensure_self_enabled
